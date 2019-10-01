@@ -14,9 +14,50 @@ from imutils import face_utils, rotate_bound
 import math
 
 
-def put_sprite(num):
+# body part IDs for retrieving face landmark info
+LEFT_EYEBROW = 1
+RIGHT_EYEBROW = 2
+LEFT_EYE = 3
+RIGHT_EYE = 4
+NOSE = 5
+MOUTH = 6
+
+ALL_SPRITES = ["Hat", "Mustache", "Flies", "Glasses", "Doggy", "Rainbow", "Googly Eyes"]
+WINDOW_NAME = "Not really snapchat"
+
+
+# class Sprite:
+#     def __init__(self, name, id):
+#         self.name = name
+#         self.id = id
+#         self.enabled = False
+
+
+# class StaticSprite(Sprite):
+#     def __init__(self, name, id, file):
+#         super().__init__(name, id)
+#         self.file = file
+
+#     def get_sprite(self):
+#         return self.file
+
+
+# class AnimatedSprite():
+#     def __init__(self, name, id, files_dir):
+#         super().__init__(name, id)
+#         self.files = files_dir
+#         self.counter = 0
+
+#     def get_sprite(self):
+#         return self.files[self.counter]
+
+#     def animate(self):
+#         self.counter = (self.counter + 1) % len(self.files)
+
+
+def toggle_sprite(num):
     global SPRITES, BTNS
-    SPRITES[num] = (1 - SPRITES[num])  # not actual value
+    SPRITES[num] = not SPRITES[num]
     BTNS[num].config(relief=SUNKEN if SPRITES[num] else RAISED)
 
 
@@ -36,10 +77,16 @@ def draw_sprite(frame, sprite, x_offset, y_offset):
         x_offset = 0
 
     # for each RGB chanel
-    for c in range(3):
+    for ch in range(3):
         # chanel 4 is alpha: 255 is not transparent, 0 is transparent background
-        frame[y_offset:y_offset + h, x_offset:x_offset + w, c] =  \
-            sprite[:, :, c] * (sprite[:, :, 3] / 255.0) + frame[y_offset:y_offset + h, x_offset:x_offset + w, c] * (1.0 - sprite[:, :, 3] / 255.0)
+        sprite_pixel = sprite[:, :, ch]
+        sprite_alpha = (sprite[:, :, 3] / 255.0)
+
+        img_pixel = frame[y_offset:y_offset + h, x_offset:x_offset + w, ch]
+        img_alpha = (1.0 - sprite_alpha)
+
+        frame[y_offset:y_offset + h, x_offset:x_offset + w, ch] = sprite_pixel * sprite_alpha + img_pixel * img_alpha
+
     return frame
 
 
@@ -51,7 +98,7 @@ def adjust_sprite2head(sprite, head_width, head_ypos, ontop=True):
     (h_sprite, w_sprite) = (sprite.shape[0], sprite.shape[1])
 
     # adjust the position of sprite to end where the head begins
-    y_orig = head_ypos - h_sprite if ontop else head_ypos
+    y_orig = (head_ypos - h_sprite) if ontop else head_ypos
     if (y_orig < 0):  # check if the head is not to close to the top of the image and the sprite would not fit in the screen
         sprite = sprite[abs(y_orig)::, :, :]  # in that case, we cut the sprite
         y_orig = 0  # the sprite then begins at the top of the image
@@ -60,7 +107,6 @@ def adjust_sprite2head(sprite, head_width, head_ypos, ontop=True):
 
 def apply_sprite(image, path2sprite, w, x, y, angle, ontop=True):
     sprite = cv2.imread(path2sprite, -1)
-    # print sprite.shape
     sprite = rotate_bound(sprite, angle)
     (sprite, y_final) = adjust_sprite2head(sprite, w, y, ontop)
     image = draw_sprite(image, sprite, x, y_final)
@@ -68,36 +114,42 @@ def apply_sprite(image, path2sprite, w, x, y, angle, ontop=True):
 
 def calc_slope(point1, point2):
     x1, x2, y1, y2 = point1[0], point2[0], point1[1], point2[1]
-    incl = 180 / math.pi * math.atan((float(y2 - y1)) / (x2 - x1))
-    return incl
+    incl_rad = math.atan((float(y2 - y1)) / (x2 - x1))
+    incl_deg = 180 / math.pi * incl_rad
+    return incl_deg
 
 
-def calculate_boundbox(list_coordinates):
-    x = min(list_coordinates[:, 0])
-    y = min(list_coordinates[:, 1])
-    w = max(list_coordinates[:, 0]) - x
-    h = max(list_coordinates[:, 1]) - y
+def calculate_boundbox(coords):
+    x = min(coords[:, 0])
+    y = min(coords[:, 1])
+    w = max(coords[:, 0]) - x
+    h = max(coords[:, 1]) - y
     return (x, y, w, h)
 
 
 def get_face_boundbox(points, face_part):
-    if face_part == 1:
-        (x, y, w, h) = calculate_boundbox(points[17:22])  # left eyebrow
-    elif face_part == 2:
-        (x, y, w, h) = calculate_boundbox(points[22:27])  # right eyebrow
-    elif face_part == 3:
-        (x, y, w, h) = calculate_boundbox(points[36:42])  # left eye
-    elif face_part == 4:
-        (x, y, w, h) = calculate_boundbox(points[42:48])  # right eye
-    elif face_part == 5:
-        (x, y, w, h) = calculate_boundbox(points[29:36])  # nose
-    elif face_part == 6:
-        (x, y, w, h) = calculate_boundbox(points[48:68])  # mouth
+    input_points = None
+    if face_part == LEFT_EYEBROW:
+        input_points = points[17:22]
+    elif face_part == RIGHT_EYEBROW:
+        input_points = points[22:27]
+    elif face_part == LEFT_EYE:
+        input_points = points[36:42]
+    elif face_part == RIGHT_EYE:
+        input_points = points[42:48]
+    elif face_part == NOSE:
+        input_points = points[29:36]
+    elif face_part == MOUTH:
+        input_points = points[48:68]
+    else:
+        raise NotImplementedError(f'Invalid face part requested for bounding box! ID: {face_part}')
+
+    (x, y, w, h) = calculate_boundbox(input_points)
     return (x, y, w, h)
 
 
 def cvloop(run_event):
-    global panelA
+    global main_panel
     global SPRITES
 
     # for flies animation
@@ -105,13 +157,12 @@ def cvloop(run_event):
     flies = [f for f in listdir(dir_) if isfile(join(dir_, f))]
     i = 0
 
-    video_capture = cv2.VideoCapture(0)  # read from webcam
-    (x, y, w, h) = (0, 0, 10, 10)  # whatever initial values
+    video_capture = cv2.VideoCapture(0)
 
     # acquire dlib's face detector
-    detector = dlib.get_frontal_face_detector()
+    face_detector = dlib.get_frontal_face_detector()
 
-    # Facial landmarks
+    # load facial landmarks model
     print("[INFO] loading facial landmark predictor...")
     model = "filters/shape_predictor_68_face_landmarks.dat"
 
@@ -121,7 +172,7 @@ def cvloop(run_event):
     while run_event.is_set():  # while the thread is active we loop
         ret, image = video_capture.read()
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        faces = detector(gray, 0)
+        faces = face_detector(gray, 0)
 
         for face in faces:  # if there are faces
             (x, y, w, h) = (face.left(), face.top(), face.width(), face.height())
@@ -165,21 +216,23 @@ def cvloop(run_event):
 
                 if is_mouth_open:
                     apply_sprite(image, "./sprites/doggy_tongue.png", w0, x0, y0, incl, ontop=False)
-            # if SPRITES[5]:
-            #     (left_x5, left_y5, left_w5, left_h5) = get_face_boundbox(shape, 3)
-            #     (right_x5, right_y5, right_w5, right_h5) = get_face_boundbox(shape, 4)
-            #     apply_sprite(image, "./sprites/eye.png", w // 2, x, left_y5, incl, ontop=False)
-            #     apply_sprite(image, "./sprites/eye.png", w // 2, x, right_y5, incl, ontop=False)
-            else:
+
+            if SPRITES[5]:
                 if is_mouth_open:
                     apply_sprite(image, "./sprites/rainbow.png", w0, x0, y0, incl, ontop=False)
+
+            if SPRITES[6]:
+                (left_x5, left_y5, left_w5, left_h5) = get_face_boundbox(shape, 3)
+                (right_x5, right_y5, right_w5, right_h5) = get_face_boundbox(shape, 4)
+                apply_sprite(image, "./sprites/eye.png", w // 6, left_x5, left_y5, incl, ontop=False)
+                apply_sprite(image, "./sprites/eye.png", w // 6, right_x5, right_y5, incl, ontop=False)
 
         # OpenCV == BGR; PIL == RGB
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = Image.fromarray(image)
         image = ImageTk.PhotoImage(image)
-        panelA.configure(image=image)
-        panelA.image = image
+        main_panel.configure(image=image)
+        main_panel.image = image
 
     video_capture.release()
 
@@ -187,34 +240,20 @@ def cvloop(run_event):
 # Initialize GUI object
 root = Tk()
 root.title("Not really Snapchat")
-this_dir = os.path.dirname(os.path.realpath(__file__))
 
-# Create 5 buttons and assign their corresponding function to active sprites
-btn1 = Button(root, text="Hat", command=lambda: put_sprite(0))
-btn1.pack(side="top", fill="both", expand="no", padx="5", pady="5")
+BTNS = []
+for (id, name) in enumerate(ALL_SPRITES):
+    def do_toggle_sprite(id):
+        return lambda: toggle_sprite(id)
 
-btn2 = Button(root, text="Mustache", command=lambda: put_sprite(1))
-btn2.pack(side="top", fill="both", expand="no", padx="5", pady="5")
+    btn = Button(root, text=name, command=do_toggle_sprite(id))
+    btn.pack(side="top", fill="both", expand="no", padx="5", pady="5")
+    BTNS.append(btn)
 
-btn3 = Button(root, text="Flies", command=lambda: put_sprite(2))
-btn3.pack(side="top", fill="both", expand="no", padx="5", pady="5")
+main_panel = Label(root)
+main_panel.pack(padx=10, pady=10)
 
-btn4 = Button(root, text="Glasses", command=lambda: put_sprite(3))
-btn4.pack(side="top", fill="both", expand="no", padx="5", pady="5")
-
-btn5 = Button(root, text="Doggy", command=lambda: put_sprite(4))
-btn5.pack(side="top", fill="both", expand="no", padx="5", pady="5")
-
-# btn6 = Button(root, text="Googly Eyes", command=lambda: put_sprite(5))
-# btn6.pack(side="top", fill="both", expand="no", padx="5", pady="5")
-
-panelA = Label(root)
-panelA.pack(padx=10, pady=10)
-
-
-# hat, mustache, flies, glasses, doggy, eyes -> 1 is visible, 0 is not visible
-SPRITES = [0, 0, 0, 0, 0]
-BTNS = [btn1, btn2, btn3, btn4, btn5]
+SPRITES = [False] * len(BTNS)
 
 # Creates a thread for openCV processing
 run_event = threading.Event()
@@ -227,7 +266,7 @@ action.start()
 # Function to clean everything up
 def terminate():
     global root, run_event, action
-    print("Closing thread opencv...")
+    print("Cleaning up OpenCV resources...")
     run_event.clear()
     time.sleep(1)
     # action.join() #strangely in Linux this thread does not terminate properly, so .join never finishes
